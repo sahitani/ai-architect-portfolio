@@ -1,0 +1,55 @@
+# Editor and IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# AI/ML specific
+*.ckpt
+*.pt
+*.pth
+*.h5
+models/
+*.bin
+
+# Data files (uncomment if you don't want to commit datasets)
+# data/
+# *.csv
+# *.json
