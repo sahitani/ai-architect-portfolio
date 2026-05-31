@@ -129,3 +129,86 @@ filtered = [x for x in items if condition(x)]
 ### Useful string method seen today
     "hello world".split()     # → ["hello", "world"] (split on whitespace)
     len("hello world".split()) # → 2 (word count)
+
+    ## Imports
+```python
+# Whole module
+import math
+math.sqrt(16)              # → 4.0
+
+# Specific thing from module
+from math import sqrt
+sqrt(16)                   # → 4.0
+
+# Multiple things
+from math import sqrt, pi
+
+# Rename on import (very common in AI/data world)
+import numpy as np
+import pandas as pd
+from rich import print as rich_print
+```
+
+## Install a new library
+
+## The `list[dict]` build pattern (with append)
+```python
+results = []
+for item in items:
+    record = {
+        "field1": some_function(item),
+        "field2": another_function(item),
+    }
+    results.append(record)
+# results is now a list of dicts, ready to use
+```
+
+## Production try/except pattern
+```python
+results = []
+failures = []
+
+for item in items:
+    try:
+        results.append(process(item))
+    except Exception as e:
+        failures.append({"item": item, "error": str(e)})
+
+# Report
+if failures:
+    print(f"{len(failures)} failed")
+```
+
+## Rich library basics
+```python
+from rich.console import Console
+from rich.table import Table
+
+console = Console()
+
+# Styled text
+console.print("[bold green]Success![/bold green]")
+console.print("[red]Error[/red] occurred")
+
+# Tables
+table = Table(title="Results")
+table.add_column("Name", style="cyan")
+table.add_column("Value", style="yellow", justify="right")
+table.add_row("First", "100")
+console.print(table)
+```
+
+## String operations seen today
+```python
+text[:50]               # first 50 characters (slice)
+"a" + "b"               # concatenate → "ab"
+str(123)                # int to string → "123"
+"line1\nline2"          # \n = newline
+```
+
+## The interactive vs file-run distinction (from Day 6)
+| Goal | Command |
+|---|---|
+| Run a whole file fresh | `python filename.py` at PowerShell |
+| Open interactive Python session | `python` alone at PowerShell |
+| Exit interactive session | `exit()` at `>>>` |

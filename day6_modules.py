@@ -50,3 +50,8 @@ table.add_row("claude-3-opus", "Anthropic", "200K tokens")
 table.add_row("llama-3", "Meta", "8K tokens")
 
 rich_print(table)
+
+try:
+    bad = int("hello")    # can't convert "hello" to a number
+except Exception as e:
+    print(f"Something went wrong: {e}")
