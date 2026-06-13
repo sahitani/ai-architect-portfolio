@@ -150,3 +150,20 @@ for msg in new_messages:
         print(f"Message: {msg[:60]}...")
         print(f"  → CLASSIFICATION FAILED")
         print("---")
+
+print("\n=== TESTING THE CATCH BLOCK ===\n")
+
+# Manually simulate what happens when classify_message receives a malformed LLM response
+def classify_message_test_failure():
+    """A version of classify_message that pretends the LLM gave a bad response."""
+    raw_response = "I'm not really sure, but I think it might be urgent maybe?"
+    
+    try:
+        return extract_json(raw_response)
+    except json.JSONDecodeError as e:
+        print(f"  ⚠ Failed to parse LLM response: {e}")
+        print(f"    Raw response: {raw_response[:80]}...")
+        return None
+
+result = classify_message_test_failure()
+print(f"Result: {result}")

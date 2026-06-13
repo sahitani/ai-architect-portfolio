@@ -1,0 +1,15 @@
+Introduction to Python
+
+Python is a high-level, interpreted programming language created by Guido van Rossum and first released in 1991. It is known for its clean syntax, readability, and a vast ecosystem of libraries, which makes it one of the most popular languages in the world.
+
+Why Python is Popular
+
+Python's popularity comes from several factors. First, the syntax is designed to be easy to read, often resembling pseudocode. Second, Python has a massive standard library and an even larger ecosystem of third-party packages available through pip. Third, the language is versatile — it is used in web development, data science, machine learning, automation, scientific computing, and education.
+
+Python in Data Science and AI
+
+Python has become the dominant language for data science and artificial intelligence. Libraries such as NumPy and Pandas provide efficient tools for numerical computing and data manipulation. For machine learning, scikit-learn offers classical algorithms, while PyTorch and TensorFlow handle deep learning. The rise of large language models has further entrenched Python's position, as nearly every major LLM library — including LangChain, LlamaIndex, and the OpenAI Python SDK — is Python-first.
+
+Common Misconceptions
+
+Despite its popularity, Python has detractors. Critics argue that it is slow compared to compiled languages like C++ or Rust. This is true for raw computation, but in practice, Python's role is usually orchestration — it calls fast underlying libraries written in C or CUDA. The trade-off is rapid development versus raw execution speed, and for most AI work, rapid iteration matters more.

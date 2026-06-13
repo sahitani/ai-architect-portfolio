@@ -1,0 +1,3 @@
+Meeting Notes - Quick Status Update
+
+Discussed Q4 priorities with the team. Main focus areas are RAG production rollout and the multi-agent prototype. Need to finalize vector database choice by next week.

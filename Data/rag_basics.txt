@@ -1,0 +1,15 @@
+What is Retrieval-Augmented Generation
+
+Retrieval-Augmented Generation, commonly known as RAG, is a technique that combines a Large Language Model with an external retrieval system. Instead of relying solely on the model's training data to answer questions, RAG retrieves relevant information from a knowledge base at query time and provides it to the model as context. This lets the model produce grounded, accurate answers based on up-to-date and domain-specific information.
+
+The RAG Pipeline
+
+A typical RAG pipeline has two main stages: ingestion and querying. During ingestion, documents are loaded, split into chunks, converted into vector embeddings using an embedding model, and stored in a vector database. During querying, the user's question is also converted to an embedding, the vector database returns the most similar chunks, and those chunks are passed to the LLM along with the original question.
+
+Why RAG Matters
+
+RAG addresses several fundamental weaknesses of standalone LLMs. First, it reduces hallucination by grounding the model in retrieved facts. Second, it lets the system access information that wasn't in the training data — recent news, internal company documents, or domain-specific knowledge. Third, it provides traceability: you can see which document chunks the model used, which is essential for enterprise applications where answers must be defensible.
+
+When Not to Use RAG
+
+RAG is not always the right tool. For pure reasoning tasks, math, or general world knowledge, retrieval adds latency without value. For very small knowledge bases that fit in the model's context window, you can simply include all information directly. For dynamic, multi-step tasks, an agentic architecture may be more appropriate than retrieval-only systems.
