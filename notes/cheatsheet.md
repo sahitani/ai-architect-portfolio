@@ -212,3 +212,308 @@ str(123)                # int to string → "123"
 | Run a whole file fresh | `python filename.py` at PowerShell |
 | Open interactive Python session | `python` alone at PowerShell |
 | Exit interactive session | `exit()` at `>>>` |
+
+## Groq API call (the standard shape)
+```python
+import os
+from dotenv import load_dotenv
+from groq import Groq
+
+load_dotenv()
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+response = client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    messages=[
+        {"role": "system", "content": "You are an AI engineering expert."},
+        {"role": "user", "content": "What is RAG?"}
+    ]
+)
+reply = response.choices[0].message.content
+```
+
+## .env loading pattern
+```python
+import os
+from dotenv import load_dotenv
+
+load_dotenv()                                # reads .env file
+api_key = os.getenv("GROQ_API_KEY")          # gets the value (None if missing)
+```
+
+## The Python file template (use for EVERY new file)
+```python
+# 1. Imports
+import os
+from somewhere import something
+
+# 2. Module-level setup (runs once on import)
+load_dotenv()
+client = SomeClient(...)
+
+# 3. Function/class definitions
+def my_function(x):
+    """One-line description."""
+    return x * 2
+
+# 4. Direct-run-only code (skipped on import)
+if __name__ == "__main__":
+    result = my_function(5)
+    print(result)
+```
+
+## Groq models to know (current)
+| Model | Use case |
+|---|---|
+| `llama-3.1-8b-instant` | Fast, cheap, decent quality |
+| `llama-3.3-70b-versatile` | Higher quality, still fast on Groq |
+| `mixtral-8x7b-32768` | Long context (32K tokens) |
+
+## Three message roles
+| Role | Purpose |
+|---|---|
+| `system` | Background instructions / persona / constraints |
+| `user` | The human's message |
+| `assistant` | The LLM's previous reply (for multi-turn conversations) |
+
+## Quick safety check before EVERY commit
+
+## The four levers of prompt engineering
+1. System message (who/rules)
+2. User message (task)
+3. Examples (few-shot)
+4. Parameters (temperature, etc.)
+
+## Structured JSON prompt template
+```python
+system_msg = """You are a [role].
+
+Return a JSON object with EXACTLY these keys:
+- "field1": [allowed values]
+- "field2": [allowed values]
+
+Rules:
+- Respond with ONLY the JSON object
+- No markdown fences, no preamble
+- All keys must be present
+- Use lowercase for string values"""
+```
+
+## JSON parsing
+```python
+import json
+
+# Native parsing (crashes on malformed JSON)
+parsed = json.loads(raw_response)
+
+# Defensive parsing (handles markdown fences)
+def extract_json(text):
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    return json.loads(text)
+```
+
+## Pattern: classification with defensive failure
+```python
+def classify_X(input_text):
+    try:
+        raw = ask_llm(prompt=input_text, system_message=schema_prompt)
+        return extract_json(raw)
+    except json.JSONDecodeError:
+        return None    # caller decides what to do on failure
+```
+
+## JSON ↔ Python type mapping
+| JSON | Python |
+|---|---|
+| "text" | str |
+| 42 | int |
+| 3.14 | float |
+| true / false | True / False |
+| null | None |
+| [1, 2] | list |
+| {"k": "v"} | dict |
+
+## Loading a file
+```python
+with open("data/file.txt", "r", encoding="utf-8") as f:
+    text = f.read()
+```
+
+## Chunking patterns (escalating sophistication)
+```python
+# Strategy 1: Fixed character chunks (PoC)
+for start in range(0, len(text), chunk_size):
+    chunks.append(text[start:start + chunk_size])
+
+# Strategy 2: With overlap
+step = chunk_size - overlap
+for start in range(0, len(text), step):
+    chunks.append(text[start:start + chunk_size])
+
+# Strategy 3: Boundary-aware — production approach is to use a library:
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
+chunks = splitter.split_text(text)
+```
+
+## The decision tree for chunk_size and overlap
+| Document type | chunk_size | overlap |
+|---|---|---|
+| Narrative text (books, articles) | 500-1500 | 100-200 |
+| Code | 1000-2000 | 100 (boundary-aware on functions) |
+| Q&A or short docs | 200-500 | 50 |
+| Technical documentation | 800-1200 | 100-150 |
+
+Rule of thumb: chunk_size ≈ a few paragraphs; overlap ≈ 1-2 sentences.
+
+## Path conventions
+- Always use forward slashes (`/`) in Python paths — works on Windows too
+- Use relative paths (`data/file.txt`) for portability
+- For complex paths, use `pathlib.Path` (covered later)
+
+## Sentence-Transformers (embeddings)
+```python
+from sentence_transformers import SentenceTransformer
+
+# Load once at module level (expensive)
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Embed one text
+embedding = model.encode("hello")    # → 384-dim numpy array
+
+# Embed many (much faster per item)
+embeddings = model.encode(["a", "b", "c"])    # → shape (3, 384)
+```
+
+## Cosine similarity (the standard for semantic search)
+```python
+import numpy as np
+
+def cosine_similarity(vec1, vec2):
+    dot = np.dot(vec1, vec2)
+    return dot / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+```
+
+## Embedding model dimensions to know
+| Model | Dimensions | Notes |
+|---|---|---|
+| all-MiniLM-L6-v2 | 384 | Fast, free, good for English |
+| all-mpnet-base-v2 | 768 | Higher quality, slower |
+| OpenAI text-embedding-3-small | 1536 | Hosted, paid, very good |
+| OpenAI text-embedding-3-large | 3072 | Hosted, paid, best |
+
+## Cosine similarity interpretation (rough)
+| Score | Meaning |
+|---|---|
+| > 0.7 | Very similar (paraphrases, same topic) |
+| 0.4-0.7 | Related |
+| 0.2-0.4 | Weakly related |
+| < 0.2 | Essentially unrelated |
+
+## The standard RAG retrieval pattern
+```python
+# At query time:
+query_embedding = embed_text(user_question)
+similarities = [cosine_similarity(query_embedding, chunk_emb) 
+                for chunk_emb in stored_embeddings]
+# Get top N indices by similarity
+top_n_indices = sorted(range(len(similarities)), 
+                       key=lambda i: similarities[i], 
+                       reverse=True)[:5]
+top_chunks = [stored_chunks[i] for i in top_n_indices]
+```
+This is conceptually what a vector database does internally — but with ANN indexes that make it fast at scale.
+
+## NumPy array vs Python list
+- NumPy arrays look similar but are optimized for math
+- `arr.shape` gives dimensions; `(384,)` means 384-element vector
+- Most operations are 100x faster than Python list equivalents
+- You can slice them like lists: `arr[:10]`
+
+## ChromaDB — the patterns to remember
+
+### Setup with custom embedding & cosine distance & persistence
+```python
+import chromadb
+from chromadb.utils import embedding_functions
+
+custom_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name="all-MiniLM-L6-v2"
+)
+
+client = chromadb.PersistentClient(path="./chroma_db")
+
+collection = client.get_or_create_collection(
+    name="my_collection",
+    embedding_function=custom_fn,
+    metadata={"hnsw:space": "cosine"}  # cosine instead of L2
+)
+```
+
+### Adding documents (with metadata)
+```python
+collection.add(
+    documents=["text1", "text2"],
+    ids=["doc1", "doc2"],
+    metadatas=[
+        {"source": "file_a.pdf", "department": "eng"},
+        {"source": "file_b.pdf", "department": "hr"}
+    ]
+)
+```
+
+### Querying — pure semantic
+```python
+results = collection.query(
+    query_texts=["my question"],
+    n_results=5
+)
+# Access:
+results["documents"][0]   # list of top matches (first query's results)
+results["distances"][0]   # corresponding distances
+results["metadatas"][0]   # corresponding metadata dicts
+results["ids"][0]         # corresponding IDs
+```
+
+### Querying — with metadata filter
+```python
+# Single condition
+results = collection.query(
+    query_texts=["my question"],
+    n_results=5,
+    where={"department": "engineering"}
+)
+
+# Compound conditions
+results = collection.query(
+    query_texts=["my question"],
+    n_results=5,
+    where={"$and": [
+        {"department": "engineering"},
+        {"doc_type": "technical"}
+    ]}
+)
+```
+
+### Filter operators
+| Operator | Meaning |
+|---|---|
+| `{"key": "value"}` | equals |
+| `{"key": {"$ne": "value"}}` | not equals |
+| `{"key": {"$gt": 5}}` | greater than |
+| `{"key": {"$in": ["a", "b"]}}` | value in list |
+| `{"$and": [...]}` | all conditions must match |
+| `{"$or": [...]}` | any condition matches |
+
+### Empty-collection guard (avoid duplicate inserts on re-runs)
+```python
+if collection.count() == 0:
+    collection.add(...)
+```
+
+### Production .gitignore additions for vector DB work

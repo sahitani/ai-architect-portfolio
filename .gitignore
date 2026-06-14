@@ -36,6 +36,7 @@ dist/
 .DS_Store
 Thumbs.db
 desktop.ini
+chroma_db/
 
 # Logs
 *.log
