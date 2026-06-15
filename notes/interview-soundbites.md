@@ -160,3 +160,21 @@
 
 ## Vector DB choice for production
 - **Soundbite:** "For prototypes I use ChromaDB locally — it's embedded, free, and the API maps cleanly to bigger databases. For production the choice depends on scale and ops appetite. ChromaDB scales up to hundreds of thousands of vectors comfortably. Beyond that: pgvector if I'm already on Postgres, Pinecone if I want fully managed, Weaviate or Qdrant if I want self-hosted with rich features, Milvus for billions of vectors across clusters. Each has the same conceptual model — collections, embeddings, metadata, similarity search — so the migration is more configuration than redesign."
+
+## Project structure: scripts vs packages
+- **Soundbite:** "For real projects, I separate code into a package (`rag/`) and scripts (`scripts/`). The package holds reusable modules — one job per file, clean imports. The scripts are operator-facing entry points that orchestrate the package. This separation matches how production Python projects are organized and makes the code testable, importable, and maintainable. Day-X-named files are fine for learning; production code lives in packages."
+
+## Wrapping a third-party database behind a custom abstraction
+- **Soundbite:** "I wrap the vector database behind a thin abstraction layer that returns standardized result objects, not the raw database response. The rest of my pipeline doesn't know whether ChromaDB or Pinecone is underneath — and switching is a one-file change. The abstraction is leaky for advanced operations, of course, but for the 80% of standard search and CRUD, it saves a redesign every time the vector DB landscape shifts. ChromaDB defaults to L2 distance and nested response shapes; my abstraction normalizes both."
+
+## Python import path traps
+- **Soundbite:** "Python's import system is path-based. When you run a script directly, Python sets the script's directory as the import root, which breaks imports of sibling packages. The clean fixes: run as a module with `python -m`, or install the project as an editable package with `pip install -e .`. The second is production-grade; the first is convenient for development. Both beat the hack of manipulating `sys.path` in code."
+
+## Similarity threshold as the gate between retrieved and relevant
+- **Soundbite:** "Vector search always returns N results — they're just the N most similar, not necessarily relevant. I set a minimum similarity threshold to filter out the noise. With MiniLM embeddings, ~0.5 is a reasonable threshold for English text. Without a threshold, you feed irrelevant chunks to the LLM and it either hallucinates connections or gives confused answers. Threshold tuning is a real design decision in RAG systems, calibrated against a holdout set of known-relevant query-document pairs."
+
+## Idempotency in ingestion pipelines
+- **Soundbite:** "Real ingestion is expensive — for large corpora, hours of embedding work. The pipeline must be idempotent: re-running it can't duplicate data or restart unnecessary work. Production systems track per-document state (last_ingested_at, version, content_hash) and only re-ingest changed documents. Even simple idempotency guards prevent painful mistakes during deployment."
+
+## The composition pattern: pipelines as orchestration of focused functions
+- **Soundbite:** "Real AI pipelines aren't monolithic — they're compositions of small, focused functions. My ingestion pipeline is literally `load → chunk → embed → store`, four function calls. Each function does one thing well; the pipeline file is just orchestration. This separation makes each stage testable in isolation, observable independently, and replaceable component-by-component. When the embedding model changes or the chunking strategy improves, the pipeline file doesn't change — only the relevant module does."

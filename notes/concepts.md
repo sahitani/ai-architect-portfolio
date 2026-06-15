@@ -643,3 +643,358 @@ The vector is the *index*. The data you actually use is the document + metadata.
 - This is exactly the kind of false positive that pure semantic search produces
 - The architectural fix: metadata filtering (scope to engineering only) or re-rankers downstream
 - Worth banking:
+
+## Day 13: RAG Ingestion Pipeline + Project Structure
+
+### Why we restructured from scripts to a package
+- Day 1-12: one file per day (good for learning, bad for shipping)
+- Day 13+: proper Python package (`rag/`) + scripts (`scripts/`)
+- A package = a folder with `__init__.py` (even empty); makes the folder importable
+- The `rag/` package contains reusable code — modules that other code imports
+- The `scripts/` folder contains operator-facing entry points (the "run this to do X" files)
+- This separation matches how real production Python projects are organized
+
+### The separation of concerns at scale
+- Each module in `rag/` has ONE job:
+    - `loader.py` — load files
+    - `chunking.py` — split text
+    - `embeddings.py` — produce embeddings
+    - `llm.py` — call the LLM
+    - `vector_store.py` — interface with ChromaDB
+    - `ingest.py` — compose the pipeline
+- The pipeline file doesn't reinvent loading/chunking/storage — it imports and orchestrates them
+- If you swap ChromaDB for Pinecone, only `vector_store.py` changes
+- This is "separation of concerns" in real architectural form
+
+### Wrapping a third-party API in your own abstraction
+- I wrapped ChromaDB's API behind a thin custom layer in `vector_store.py`
+- Functions: `get_collection()`, `add_chunks()`, `search()`
+- ChromaDB's raw query response is awkward (nested lists indexed by query, then by rank)
+- My `search()` returns a clean list of dicts: `[{"document": ..., "metadata": ..., "distance": ...}]`
+- The rest of my code never sees ChromaDB-specific data shapes
+- Migration to another vector DB = one file changes
+
+### The Python import path trap
+- Python's import system looks for modules in `sys.path`
+- When you run `python script.py`, the SCRIPT's directory is added to sys.path — not the directory you ran from
+- This breaks `from rag.foo import bar` if rag/ is one level up
+- The fix is to run scripts as modules: `python -m scripts.run_ingestion`
+- The `-m` flag uses the current working directory as the import root
+- Or use `pip install -e .` to install the project as an editable package (Day 15)
+
+### The venv-not-activated debugging pattern
+- Symptom: `ModuleNotFoundError` for a library you "definitely installed"
+- Diagnosis: `python -c "import sys; print(sys.executable)"`
+- If the path doesn't show `.venv\Scripts\python.exe`, your venv isn't active
+- Fix: `.venv\Scripts\Activate.ps1` (look for the `(.venv)` prefix in your prompt)
+- Don't reinstall the library; the library is fine — Python is just looking in the wrong place
+
+### Module-level constants vs function-internal initialization
+- Expensive setup (model loading, client creation) goes at MODULE LEVEL — runs once on import
+- Cheap operations go inside FUNCTIONS — runs every call
+- Examples in this project:
+    - `_model = SentenceTransformer(...)` at top of `embeddings.py`
+    - `_client = Groq(...)` at top of `llm.py`
+    - `_embedding_fn = ...` at top of `vector_store.py`
+- Underscore prefix `_model` signals "private to this module"
+
+### The main() function pattern for scripts
+- Wrap script logic in a function called `main()`
+- Bottom of file: `if __name__ == "__main__": main()`
+- Benefits: encapsulation (no module-level pollution), testability (can call programmatically), 
+  clarity (obvious entry point), reusability (functions can be imported elsewhere)
+- This is the convention in essentially every professional Python script
+
+### Idempotent ingestion
+- Re-running the ingestion script shouldn't break things or create duplicates
+- Simple guard: `if collection.count() == 0: ingest()` else skip
+- Real production goes further: track which documents were ingested, only re-ingest changed ones
+- Why this matters: real ingestion is expensive (hours for large corpora); never want to redo it accidentally
+
+### Chunk size is relative, not absolute
+- 300-char chunks make sense for documents in the 1000-10,000 char range
+- For very short documents (<300 chars): one chunk per document — correct behavior
+- For very long documents: hierarchical chunking (paragraphs + sections + full doc levels)
+- Production RAG often uses adaptive chunking per document type
+- The chunking strategy you pick is a tradeoff between retrieval precision and context preservation
+
+### Why similarity thresholds matter (from Query 3)
+- Vector search ALWAYS returns N results, even if they're terrible
+- Query about Q4 priorities returned the relevant chunk (sim=0.68) AND two garbage chunks (sim=0.19, 0.18)
+- Without a threshold, you'd feed all three to the LLM — including the noise
+- With threshold=0.5, only the relevant chunk passes through
+- This is the gate between "retrieved" and "actually relevant"
+- The right threshold depends on the embedding model (MiniLM ~0.5; bigger models often higher)
+
+### Semantic search's graceful degradation (from Query 4)
+- "Tell me about embeddings" — no document was specifically about embeddings
+- System returned the closest related content (a chunk that mentions embeddings in context)
+- This is valuable (no hard failures) but also a risk (LLM might overclaim)
+- The architectural fix: combine threshold filtering + "I don't know" fallbacks in your prompt
+- Tomorrow we'll wire this together with the LLM
+
+
+This is exceptional output. Every query did exactly the right thing. Let me walk through what each one tells us, because there are real lessons in this data.
+Query 1: "What is Python used for?"
+All three top results are from python_intro.txt. Similarity scores: 0.732, 0.673, 0.664. Strong matches across the board.
+The pattern: the system not only found the right document, but found multiple good chunks within it. If you were building a real RAG answer, you'd have 3 high-quality candidate chunks to feed the LLM — much better than just one.
+Notice the top score (0.732) is meaningfully higher than the others. That's a confident match. The query is closely paraphrased in the chunk text ("Python is a high-level, interpreted programming language..." directly answers "what is Python used for?").
+Query 2: "How does retrieval-augmented generation work?"
+Top result: rag_basics.txt #0 at 0.689 — the chunk that literally starts with the section header "What is Retrieval-Augmented Generation". Perfect.
+But look at the drop-off after that: 0.438, 0.404. The second and third results are still from the right document, but their similarity scores fall sharply. This tells you something:
+The top result is a clear winner; the others are progressively weaker. In production, you'd use a "similarity threshold" to decide how many chunks to include — for example: "only include chunks above 0.5 in the LLM context". With this query, you'd include just the top chunk and stop. That's smart RAG: don't pollute the LLM's context with marginally-relevant material.
+Query 3: "What did we discuss about Q4 priorities?"
+Top result: short_note.txt #0 at 0.680. Perfect — found the right single-chunk document.
+Now look at the second and third results: 0.195 and 0.186. Those are garbage scores. They're chunks from rag_basics.txt that have nothing to do with Q4 priorities. The vector search dutifully returned the 3 most similar chunks because we asked for 3, but only one is genuinely relevant.
+This is exactly what similarity thresholds protect against. Without a threshold, you'd feed two irrelevant chunks to your LLM, and the LLM might invent connections that don't exist or get confused. With a threshold of 0.5, only the actually-relevant chunk passes through.
+Worth banking — this is a Day-14 design decision we'll make:
+
+"You should always set a minimum similarity threshold for RAG retrieval. The vector database will faithfully return the N most similar chunks for any query — but 'most similar' isn't the same as 'similar enough to be useful.' A threshold of ~0.5 (for MiniLM) filters out the noise. Without it, the LLM gets fed irrelevant chunks and either hallucinates connections or gives confused answers. The threshold is the gate between 'retrieved' and 'relevant.'"
+
+Query 4: "Tell me about embeddings" — the most interesting case
+Top result: rag_basics.txt #4 at 0.511. Genuinely relevant — this chunk happens to mention embeddings in the context of the RAG pipeline. Even though we never created a document specifically about embeddings, the system found the closest discussion of them.
+This is the graceful degradation property of semantic search: when there's no perfect match, it returns the most-related content rather than failing. That's valuable, but also a risk:
+
+The 0.511 score is in the borderline "related" range, not "very similar"
+If the user expected detailed embedding content, they'd be disappointed
+An LLM consuming this chunk might confidently produce shallow or partial answers
+
+The architectural lesson: semantic search will always return something. Whether what it returned is good enough is a separate question — answered by the threshold, the LLM's grounding, and ideally a "I don't know" fallback when nothing relevant exists.
+What this output proves overall
+Step back from the individual results and notice the bigger picture:
+Your RAG ingestion pipeline works end-to-end. Documents from disk → chunks → embeddings → ChromaDB → semantic retrieval → ranked results with metadata. Every primitive you built across Days 8-12 is now composing into a working system. Three sample documents, four sample queries, four sensible retrieval results.
+You haven't called an LLM yet today. That's Day 14. But you have the half of RAG that matters most — the retrieval half. The LLM piece is essentially "take these chunks and the question, and ask the LLM" — which is just ask_llm() with a slightly more elaborate prompt template.
+
+Day 13 is officially done
+You did real architectural work today. Let me close it out properly.
+What you accomplished
+
+Restructured your project into a proper package layout (rag/ + scripts/)
+Migrated 5 building blocks into focused modules with proper docstrings
+Built a clean abstraction over ChromaDB that hides vector-DB specifics behind clean function signatures
+Composed the ingestion pipeline (load → chunk → embed → store) as a single reusable flow
+Built an idempotent operator script with proper main() pattern, error handling, and summary reporting
+Verified the system works with four diverse queries against three real documents
+Picked up real Python packaging fluency (python -m, sys.path, ModuleNotFoundError, venv activation diagnostics)
+
+Where you stand
+✅ Days 1-12:   Building blocks
+✅ Day 13:      RAG ingestion pipeline + project restructure
+─────────────────────────────────────────
+Day 14:        Query side — retrieve → augment → generate (with the LLM!)
+Day 15:        Polish, README, edge cases, production-shape ending
+One day from now you'll have a working RAG system that answers questions in natural language using grounded retrieved context. Tomorrow's the day.
+
+End-of-day ritual
+1. Verify .env and chroma_db/ are still gitignored:
+git status
+Confirm neither .env nor chroma_db/ appear in the output.
+2. Commit:
+git add .
+git commit -m "Day 13: Project restructure + RAG ingestion pipeline (load -> chunk -> embed -> store)"
+git push
+You should be at 24 commits on GitHub.
+3. Notes blocks — paste, add anything that resonated personally, commit.
+
+Add to notes/concepts.md
+markdown## Day 13: RAG Ingestion Pipeline + Project Structure
+
+### Why we restructured from scripts to a package
+- Day 1-12: one file per day (good for learning, bad for shipping)
+- Day 13+: proper Python package (`rag/`) + scripts (`scripts/`)
+- A package = a folder with `__init__.py` (even empty); makes the folder importable
+- The `rag/` package contains reusable code — modules that other code imports
+- The `scripts/` folder contains operator-facing entry points (the "run this to do X" files)
+- This separation matches how real production Python projects are organized
+
+### The separation of concerns at scale
+- Each module in `rag/` has ONE job:
+    - `loader.py` — load files
+    - `chunking.py` — split text
+    - `embeddings.py` — produce embeddings
+    - `llm.py` — call the LLM
+    - `vector_store.py` — interface with ChromaDB
+    - `ingest.py` — compose the pipeline
+- The pipeline file doesn't reinvent loading/chunking/storage — it imports and orchestrates them
+- If you swap ChromaDB for Pinecone, only `vector_store.py` changes
+- This is "separation of concerns" in real architectural form
+
+### Wrapping a third-party API in your own abstraction
+- I wrapped ChromaDB's API behind a thin custom layer in `vector_store.py`
+- Functions: `get_collection()`, `add_chunks()`, `search()`
+- ChromaDB's raw query response is awkward (nested lists indexed by query, then by rank)
+- My `search()` returns a clean list of dicts: `[{"document": ..., "metadata": ..., "distance": ...}]`
+- The rest of my code never sees ChromaDB-specific data shapes
+- Migration to another vector DB = one file changes
+
+### The Python import path trap
+- Python's import system looks for modules in `sys.path`
+- When you run `python script.py`, the SCRIPT's directory is added to sys.path — not the directory you ran from
+- This breaks `from rag.foo import bar` if rag/ is one level up
+- The fix is to run scripts as modules: `python -m scripts.run_ingestion`
+- The `-m` flag uses the current working directory as the import root
+- Or use `pip install -e .` to install the project as an editable package (Day 15)
+
+### The venv-not-activated debugging pattern
+- Symptom: `ModuleNotFoundError` for a library you "definitely installed"
+- Diagnosis: `python -c "import sys; print(sys.executable)"`
+- If the path doesn't show `.venv\Scripts\python.exe`, your venv isn't active
+- Fix: `.venv\Scripts\Activate.ps1` (look for the `(.venv)` prefix in your prompt)
+- Don't reinstall the library; the library is fine — Python is just looking in the wrong place
+
+### Module-level constants vs function-internal initialization
+- Expensive setup (model loading, client creation) goes at MODULE LEVEL — runs once on import
+- Cheap operations go inside FUNCTIONS — runs every call
+- Examples in this project:
+    - `_model = SentenceTransformer(...)` at top of `embeddings.py`
+    - `_client = Groq(...)` at top of `llm.py`
+    - `_embedding_fn = ...` at top of `vector_store.py`
+- Underscore prefix `_model` signals "private to this module"
+
+### The main() function pattern for scripts
+- Wrap script logic in a function called `main()`
+- Bottom of file: `if __name__ == "__main__": main()`
+- Benefits: encapsulation (no module-level pollution), testability (can call programmatically), 
+  clarity (obvious entry point), reusability (functions can be imported elsewhere)
+- This is the convention in essentially every professional Python script
+
+### Idempotent ingestion
+- Re-running the ingestion script shouldn't break things or create duplicates
+- Simple guard: `if collection.count() == 0: ingest()` else skip
+- Real production goes further: track which documents were ingested, only re-ingest changed ones
+- Why this matters: real ingestion is expensive (hours for large corpora); never want to redo it accidentally
+
+### Chunk size is relative, not absolute
+- 300-char chunks make sense for documents in the 1000-10,000 char range
+- For very short documents (<300 chars): one chunk per document — correct behavior
+- For very long documents: hierarchical chunking (paragraphs + sections + full doc levels)
+- Production RAG often uses adaptive chunking per document type
+- The chunking strategy you pick is a tradeoff between retrieval precision and context preservation
+
+### Why similarity thresholds matter (from Query 3)
+- Vector search ALWAYS returns N results, even if they're terrible
+- Query about Q4 priorities returned the relevant chunk (sim=0.68) AND two garbage chunks (sim=0.19, 0.18)
+- Without a threshold, you'd feed all three to the LLM — including the noise
+- With threshold=0.5, only the relevant chunk passes through
+- This is the gate between "retrieved" and "actually relevant"
+- The right threshold depends on the embedding model (MiniLM ~0.5; bigger models often higher)
+
+### Semantic search's graceful degradation (from Query 4)
+- "Tell me about embeddings" — no document was specifically about embeddings
+- System returned the closest related content (a chunk that mentions embeddings in context)
+- This is valuable (no hard failures) but also a risk (LLM might overclaim)
+- The architectural fix: combine threshold filtering + "I don't know" fallbacks in your prompt
+- Tomorrow we'll wire this together with the LLM
+
+Add to notes/cheatsheet.md
+markdown## Project structure (your portfolio shape)
+ai-architect-portfolio/
+
+├── rag/                     ← package (importable code)
+
+│   ├── init.py          ← makes folder a package
+
+│   ├── llm.py
+
+│   ├── embeddings.py
+
+│   ├── chunking.py
+
+│   ├── loader.py
+
+│   ├── vector_store.py
+
+│   └── ingest.py
+
+├── scripts/                 ← operator-facing scripts
+
+│   ├── run_ingestion.py
+
+│   └── run_search.py
+
+├── data/
+
+├── chroma_db/               ← gitignored
+
+└── notes/
+
+## Running scripts in this structure
+From project root, with venv active
+python -m scripts.run_ingestion     # note: dots, not slashes
+
+python -m scripts.run_search
+
+The `-m` flag treats the path as a module. The cwd becomes the import root.
+
+## Standard module template
+```python
+"""One-line description of what this module is for."""
+
+# Imports (stdlib, then third-party, then local)
+import os
+from sentence_transformers import SentenceTransformer
+from rag.embeddings import embed_text
+
+# Module-level setup (expensive, runs once)
+_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Public functions
+def my_function(arg):
+    """One-line docstring describing what this does."""
+    return arg * 2
+
+# (For modules with runnable demo logic, add at the bottom:)
+if __name__ == "__main__":
+    main()
+```
+
+## Standard script template
+```python
+"""One-line description of what this script does.
+
+Usage:
+    python -m scripts.script_name
+"""
+
+from rag.something import some_function
+
+def main():
+    # script logic here
+    pass
+
+if __name__ == "__main__":
+    main()
+```
+
+## Diagnostic for venv-related import errors
+1. Which Python is running?
+python -c "import sys; print(sys.executable)"
+2. Is the library installed in this Python?
+pip show <library_name>
+3. Is venv active?
+echo $env:VIRTUAL_ENV   # (PowerShell)
+Fix if not active:
+.venv\Scripts\Activate.ps1
+
+## End-to-end RAG ingestion pattern
+```python
+from rag.loader import load_document
+from rag.chunking import chunk_smart
+from rag.vector_store import get_collection, add_chunks
+
+collection = get_collection(name="rag_collection")
+text = load_document("data/file.txt")
+chunks = chunk_smart(text, chunk_size=300, overlap=50)
+add_chunks(collection, chunks, source="file.txt")
+```
+
+## Search pattern
+```python
+from rag.vector_store import get_collection, search
+
+collection = get_collection(name="rag_collection")
+results = search(collection, "my question", n_results=5)
+
+for r in results:
+    print(r["document"], r["metadata"], r["distance"])
+```

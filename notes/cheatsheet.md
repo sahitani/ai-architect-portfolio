@@ -517,3 +517,77 @@ if collection.count() == 0:
 ```
 
 ### Production .gitignore additions for vector DB work
+
+
+## RAG answer_question pattern
+```python
+from rag.qa import answer_question
+
+result = answer_question("My question", n_results=3, min_similarity=0.3)
+print(result["answer"])              # the LLM's text answer
+print(result["sources"])             # list of source files used
+print(result["num_relevant"])        # count of chunks that passed threshold
+print(result["retrieved_chunks"])    # full retrieval results (debug)
+```
+
+## RAG system message template (copy-paste base)
+```python
+QA_SYSTEM_MESSAGE = """You are a helpful AI assistant that answers questions using ONLY the context provided below.
+
+Rules:
+- Base your answer strictly on the provided context.
+- If the context doesn't contain enough information, respond with: "I don't have enough information in my knowledge base to answer this question."
+- Do not fabricate, speculate, or use external knowledge beyond what's in the context.
+- When possible, cite the source filename in your answer.
+- Keep answers concise and directly responsive to the question."""
+```
+
+## RAG prompt structure
+CONTEXT:
+
+[Source: file1.txt (chunk 0)]
+
+<chunk text>
+[Source: file2.txt (chunk 3)]
+
+<chunk text>
+QUESTION:
+
+<user's actual question>
+
+## Similarity threshold tuning (rough)
+| Embedding model | Strong match | Threshold (start) |
+|---|---|---|
+| MiniLM-L6 | ~0.7+ | 0.3 |
+| mpnet-base-v2 | ~0.7+ | 0.4 |
+| OpenAI text-embedding-3-small | ~0.5+ | 0.3 |
+| OpenAI text-embedding-3-large | ~0.6+ | 0.4 |
+
+Always calibrate against a holdout set of known-relevant pairs.
+
+## The full RAG application (end-to-end)
+User question
+
+↓
+
+embed_text() / collection embeds it internally
+
+↓
+
+search(collection, question)            ← Day 12-13
+
+↓
+
+[filter by similarity threshold]
+
+↓
+
+build_prompt(question, chunks)          ← Day 14
+
+↓
+
+ask_llm(prompt, QA_SYSTEM_MESSAGE)      ← Day 8 building block
+
+↓
+
+Return: answer + sources + chunks
